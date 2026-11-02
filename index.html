@@ -1,0 +1,765 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Trait Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: one screen. Top bar (name, scenario letters, run controls); dish over trait-frequency graph on the left; conditions and per-variant data in a sidebar. Stacks and scrolls only on phones. */
+:root {
+  --bg: #EEF0F3;
+  --surface: #F9FAFB;
+  --surface-2: #E3E7EC;
+  --ink: #161D26;
+  --muted: #56606D;
+  --line: #C9D0D9;
+  --accent: #E7A32A;
+  --accent-ink: #1A1405;
+  --focus: #2A5BB8;
+  --font-display: 'Bricolage Grotesque', 'Avenir Next', 'Segoe UI', sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-data: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C1016; --surface: #141A22; --surface-2: #1D2530; --ink: #E5EAF0; --muted: #98A3B1;
+    --line: #2A3441; --accent: #EDB041; --accent-ink: #1A1405; --focus: #8DB3FF;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C1016; --surface: #141A22; --surface-2: #1D2530; --ink: #E5EAF0; --muted: #98A3B1;
+  --line: #2A3441; --accent: #EDB041; --accent-ink: #1A1405; --focus: #8DB3FF;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45; }
+.app {
+  display: flex; flex-direction: column; gap: 10px; padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; margin: 0; }
+h1 { font-size: 21px; font-weight: 800; line-height: 1.1; white-space: nowrap; }
+h2 { font-size: 22px; font-weight: 800; line-height: 1.1; }
+h3 { font-size: 15px; font-weight: 700; }
+button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.picker { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.picker .lbl { font: 600 11px var(--font-body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.letters { display: flex; gap: 4px; overflow-x: auto; min-width: 0; }
+.letter { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: 700 15px var(--font-display); }
+.letter[aria-current="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.run { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+.btn { font: 600 13px var(--font-body); padding: 7px 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; min-width: 96px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { font: 500 12px var(--font-data); padding: 7px 9px; border: 0; background: var(--surface); color: var(--ink); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+
+.main { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.stage { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.dishBox { position: relative; border-radius: 8px; overflow: hidden; background: #CDB98C; aspect-ratio: 1.6; max-width: 100%; display: flex; align-items: center; justify-content: center; transition: background .6s; }
+#arena { display: block; width: 100%; height: 100%; }
+.clock { position: absolute; top: 8px; left: 8px; padding: 3px 8px; border-radius: 6px; background: rgba(12, 16, 22, 0.8); color: #E6EEF0; font: 500 13px var(--font-data); font-variant-numeric: tabular-nums; }
+.legend { position: absolute; top: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 4px 9px; border-radius: 6px; background: rgba(12, 16, 22, 0.8); color: #E6EEF0; font-size: 12px; max-width: calc(100% - 110px); justify-content: flex-end; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.banner { position: absolute; left: 10px; right: 10px; bottom: 10px; margin: 0 auto; max-width: 440px; padding: 8px 12px; border-radius: 7px; text-align: center; font-size: 13.5px; background: rgba(12, 16, 22, 0.88); color: #E6EEF0; pointer-events: none; }
+.chartPanel { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.chartHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.tabs button { font: 600 12px var(--font-body); padding: 5px 10px; border: 0; background: var(--surface); color: var(--ink); cursor: pointer; }
+.tabs button + button { border-left: 1px solid var(--line); }
+.tabs button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.chartHead .note { font-size: 12px; color: var(--muted); }
+.chartBox { position: relative; height: 190px; border-radius: 8px; overflow: hidden; background: #E9EDF1; }
+#chart { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.side { display: flex; flex-direction: column; gap: 11px; min-width: 0; min-height: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.setup { margin: 4px 0 0; font-size: 14px; }
+.sec { display: flex; flex-direction: column; gap: 6px; }
+.secT { font: 600 11px var(--font-body); letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0; }
+dl.cond { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; font-size: 13px; }
+dl.cond dt { font-weight: 600; color: var(--muted); }
+dl.cond dd { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.dim { color: var(--muted); }
+.sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(0,0,0,.35); vertical-align: -1px; margin-right: 6px; flex: 0 0 auto; }
+hr.rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
+.prog { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.prog i { display: block; height: 100%; width: 0; background: var(--accent); }
+.timeRow { display: flex; justify-content: space-between; font-size: 12.5px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: right; font: 600 10.5px var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 0 4px 4px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child { text-align: left; }
+td { padding: 4px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+td.pct { font-weight: 600; }
+td.v { white-space: nowrap; font-weight: 600; }
+tr.tot td { font-weight: 600; border-bottom: 0; }
+.ico { flex: 0 0 auto; }
+
+@media (min-width: 760px) and (min-height: 520px) {
+  .app { height: 100%; overflow: hidden; }
+  .main { flex: 1 1 auto; display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 30vw, 380px); }
+  .dishBox { flex: 1 1 60%; aspect-ratio: auto; min-height: 0; }
+  .chartPanel { flex: 1 1 40%; min-height: 130px; max-height: 270px; }
+  .chartBox { flex: 1 1 auto; height: auto; min-height: 0; }
+  #arena { position: absolute; width: auto; height: auto; }
+  .side { overflow-y: auto; }
+}
+@media (min-width: 760px) and (max-height: 740px) { .side { gap: 8px; padding-block: 10px; } .chartPanel { flex-basis: 36%; } }
+@media (prefers-reduced-motion: reduce) { .dishBox { transition: none; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>Trait Tracker</h1>
+    <div class="picker">
+      <span class="lbl" id="scLbl">Scenario</span>
+      <nav class="letters" id="letters" aria-labelledby="scLbl"></nav>
+    </div>
+    <div class="run">
+      <button type="button" class="btn primary" id="play">Play</button>
+      <button type="button" class="btn" id="replay">Replay</button>
+      <div class="seg" role="group" aria-label="Simulation speed" id="speed">
+        <button type="button" data-speed="1" aria-pressed="false">1×</button>
+        <button type="button" data-speed="2" aria-pressed="true">2×</button>
+        <button type="button" data-speed="4" aria-pressed="false">4×</button>
+        <button type="button" data-speed="8" aria-pressed="false">8×</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="stage">
+      <div class="dishBox" id="dishBox">
+        <canvas id="arena" role="img" aria-label="The population in its environment. Each creature shows its own coat color, jaw size, leg length and tail pattern."></canvas>
+        <div class="clock" id="clock">Generation 0</div>
+        <div class="legend" id="legend"></div>
+        <p class="banner" id="banner"></p>
+      </div>
+      <section class="chartPanel" aria-label="Trait frequency graph">
+        <div class="chartHead">
+          <div class="tabs" role="group" aria-label="Trait to graph" id="tabs"></div>
+          <span class="note">Percent of the population with each variant, by generation</span>
+        </div>
+        <div class="chartBox" id="chartBox"><canvas id="chart" role="img" aria-label="Stacked graph showing the percent of the population with each variant of the selected trait over 15 generations, with the total population as a dashed line."></canvas></div>
+      </section>
+    </div>
+
+    <aside class="side" aria-label="Scenario conditions and data">
+      <div>
+        <h2 id="scTitle"></h2>
+        <p class="setup" id="scSetup"></p>
+      </div>
+      <section class="sec">
+        <h3 class="secT">Conditions</h3>
+        <dl class="cond" id="cond"></dl>
+      </section>
+      <hr class="rule">
+      <section class="sec">
+        <h3 class="secT" id="dataT">Data</h3>
+        <div class="timeRow"><span>Generation</span><span class="mono" id="genTxt"></span></div>
+        <div class="prog" aria-hidden="true"><i id="progBar"></i></div>
+        <table>
+          <thead><tr><th>Variant</th><th>Alive</th><th>%</th><th>Born</th><th>Eaten</th><th>Starved</th></tr></thead>
+          <tbody id="dataBody"></tbody>
+        </table>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<script>
+(function () {
+'use strict';
+
+/* ============ TRAIT TRACKER ENGINE (no DOM) ============ */
+var W = 960, H = 600, GEN = 20, GENS = 15;
+var TRAITS = {
+  coat:   { label: 'Coat color',   variants: ['sandy', 'medium', 'dark'], names: { sandy: 'Sandy', medium: 'Medium brown', dark: 'Dark' } },
+  jaw:    { label: 'Jaw size',     variants: ['small', 'large'],          names: { small: 'Small jaw', large: 'Large jaw' } },
+  legs:   { label: 'Leg length',   variants: ['short', 'long'],           names: { short: 'Short legs', long: 'Long legs' } },
+  stripe: { label: 'Tail pattern', variants: ['plain', 'striped'],        names: { plain: 'Plain tail', striped: 'Striped tail' } }
+};
+var GROUND = { sand: { name: 'Light sand' }, ash: { name: 'Dark volcanic ash' } };
+var FOOD = { soft: { name: 'Soft seeds', energy: 24 }, hard: { name: 'Hard nuts', energy: 30 } };
+var CAMO = { sand: { sandy: 0.6, medium: 0.3, dark: -0.05 }, ash: { sandy: -0.05, medium: 0.3, dark: 0.6 } };
+var JAW_EFF = { soft: { small: 1.0, large: 0.85 }, hard: { small: 0.2, large: 1.0 } };
+var LEGS = { short: { speed: 42, cost: 0.9, dodge: 0 }, long: { speed: 52, cost: 1.05, dodge: 0.5 } };
+var HAWK = { speed: 56, lunge: 92, lungeR: 70, lungeMax: 2.4, tired: 1.8, wander: 40, sense: 170, strike: 11, restKill: 3.4, turn: 5 };
+var CELL = 64, CAP_FOOD = 150, CAP_CREATURES = 260, FLOOR = 6;
+var EAT_R = 11, REPRO_E = 75, REPRO_COST = 50, CHILD_E = 40, MAX_E = 120, MATURE = 8, WALL = 14, VISION = 80, HANDLE = 0.3;
+
+function mulberry32(a) {
+  return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function pickMix(rng, mix) {
+  var u = rng(), acc = 0, k;
+  for (k in mix) { acc += mix[k]; if (u < acc) return k; }
+  return k;
+}
+function upkeepOf(c) { var L = LEGS[c.genes.legs]; return (1.6 + 0.0006 * L.speed * L.speed) * L.cost; }
+
+/* sc: scenario config. */
+function createSim(sc) {
+  var rng = mulberry32(sc.seed);
+  var g = { t: 0, creatures: [], hawks: [], food: [], events: [], ground: sc.ground, growth: { soft: sc.seeds.soft, hard: sc.seeds.hard },
+            acc: { soft: 0, hard: 0 }, mutRate: sc.mut || 0, evIdx: 0, stats: {} , mutants: 0 };
+  Object.keys(TRAITS).forEach(function (tr) { TRAITS[tr].variants.forEach(function (v) { g.stats[tr + ':' + v] = { born: 0, eaten: 0, starved: 0, old: 0 }; }); });
+  var cols = Math.ceil(W / CELL), rows = Math.ceil(H / CELL), grid = [];
+
+  function spawnFood(type) { g.food.push({ type: type, x: 12 + rng() * (W - 24), y: 12 + rng() * (H - 24), rot: rng() * 3.14, dead: false }); }
+  function foodCount(type) { var n = 0; for (var i = 0; i < g.food.length; i++) if (g.food[i].type === type && !g.food[i].dead) n++; return n; }
+  function ev(kind, c) { if (g.events.length < 200) g.events.push({ kind: kind, x: c.x, y: c.y, genes: c.genes }); }
+  function make(genes, x, y, e, age) {
+    return { genes: genes, x: x, y: y, a: rng() * 6.283, e: e, age: age, life: 80 + rng() * 40, tgt: null, search: rng() * 0.3, handle: 0, flee: 0, dead: null, mutant: false };
+  }
+  function addHawk() { g.hawks.push({ x: rng() * W, y: rng() * H, a: rng() * 6.283, rest: 2 + rng() * 2, tgt: null, search: 0, lungeT: 0 }); }
+  function tally(c, key) { Object.keys(c.genes).forEach(function (tr) { g.stats[tr + ':' + c.genes[tr]][key]++; }); }
+
+  g.count = function () { return g.creatures.length; };
+  g.freq = function (tr) {
+    var o = {}; TRAITS[tr].variants.forEach(function (v) { o[v] = 0; });
+    g.creatures.forEach(function (c) { o[c.genes[tr]]++; });
+    return o;
+  };
+  g.foodCount = foodCount;
+  g.rng = rng;
+
+  // setup
+  ['soft', 'hard'].forEach(function (f) { var n = Math.round(g.growth[f] * 8); for (var i = 0; i < n; i++) spawnFood(f); });
+  for (var i = 0; i < sc.start.n; i++) {
+    var genes = {};
+    Object.keys(TRAITS).forEach(function (tr) { genes[tr] = pickMix(rng, sc.start.mix[tr]); });
+    g.creatures.push(make(genes, 40 + rng() * (W - 80), 40 + rng() * (H - 80), 50 + rng() * 20, rng() * 50));
+  }
+  for (var h = 0; h < sc.hawks; h++) addHawk();
+
+  function applyEvent(e) {
+    if (e.ground) g.ground = e.ground;
+    if (e.seeds) { g.growth = { soft: e.seeds.soft, hard: e.seeds.hard }; }
+    if (e.hawks !== undefined) { while (g.hawks.length < e.hawks) addHawk(); g.hawks.length = e.hawks; }
+    if (e.mutant) {   // one newborn-sized mutant appears
+      for (var k = 0; k < (e.count || 1); k++) {
+        var p = g.creatures[(rng() * g.creatures.length) | 0], genes = {};
+        for (var t in p.genes) genes[t] = p.genes[t];
+        for (t in e.mutant) genes[t] = e.mutant[t];
+        var c = make(genes, p.x, p.y, 70, MATURE); c.mutant = true; g.creatures.push(c); g.mutants++;
+        ev('mutant', c);
+      }
+    }
+  }
+  function buildGrid() {
+    grid = new Array(cols * rows);
+    for (var i = 0; i < grid.length; i++) grid[i] = [];
+    for (i = 0; i < g.food.length; i++) {
+      var f = g.food[i]; if (f.dead) continue;
+      grid[Math.min(rows - 1, (f.y / CELL) | 0) * cols + Math.min(cols - 1, (f.x / CELL) | 0)].push(f);
+    }
+  }
+  function bestFood(c) {
+    var best = null, bs = 0, r = Math.ceil(VISION / CELL), v2 = VISION * VISION;
+    var cx = Math.min(cols - 1, Math.max(0, (c.x / CELL) | 0)), cy = Math.min(rows - 1, Math.max(0, (c.y / CELL) | 0));
+    for (var gy = Math.max(0, cy - r); gy <= Math.min(rows - 1, cy + r); gy++) {
+      for (var gx = Math.max(0, cx - r); gx <= Math.min(cols - 1, cx + r); gx++) {
+        var cell = grid[gy * cols + gx];
+        for (var i = 0; i < cell.length; i++) {
+          var f = cell[i]; if (f.dead) continue;
+          var dx = f.x - c.x, dy = f.y - c.y, d2 = dx * dx + dy * dy; if (d2 > v2) continue;
+          var sc2 = JAW_EFF[f.type][c.genes.jaw] / (Math.sqrt(d2) + 25);
+          if (sc2 > bs) { bs = sc2; best = f; }
+        }
+      }
+    }
+    return best;
+  }
+  function turnToward(o, want, maxTurn) {
+    var d = want - o.a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+    o.a += Math.max(-maxTurn, Math.min(maxTurn, d));
+  }
+  function bounce(o) {
+    if (o.x < WALL) { o.x = WALL; o.a = Math.PI - o.a; }
+    if (o.x > W - WALL) { o.x = W - WALL; o.a = Math.PI - o.a; }
+    if (o.y < WALL) { o.y = WALL; o.a = -o.a; }
+    if (o.y > H - WALL) { o.y = H - WALL; o.a = -o.a; }
+  }
+  function camo(c) { return CAMO[g.ground][c.genes.coat]; }
+
+  g.step = function (dt) {
+    while (g.evIdx < sc.events.length && g.t >= sc.events[g.evIdx].gen * GEN - 1e-9) applyEvent(sc.events[g.evIdx++]);
+    ['soft', 'hard'].forEach(function (type) {
+      g.acc[type] += g.growth[type] * dt;
+      while (g.acc[type] >= 1) { g.acc[type] -= 1; if (foodCount(type) < CAP_FOOD) spawnFood(type); }
+    });
+    buildGrid();
+    var safe = g.creatures.length <= FLOOR;
+
+    g.hawks.forEach(function (p) {
+      if (p.rest > 0) { p.rest -= dt; p.tgt = null; p.a += (rng() - 0.5) * 2 * dt; p.x += Math.cos(p.a) * 8 * dt; p.y += Math.sin(p.a) * 8 * dt; bounce(p); return; }
+      if (p.tgt && (p.tgt.dead || safe)) p.tgt = null;
+      if (p.tgt) {
+        var t = p.tgt, dx = t.x - p.x, dy = t.y - p.y;
+        var range = HAWK.sense * (1 - camo(t));
+        if (dx * dx + dy * dy > range * range * 2.56) { p.tgt = null; p.lungeT = 0; }
+      }
+      p.search -= dt;
+      if (!p.tgt && p.search <= 0 && !safe) {
+        p.search = 0.3;
+        var best = null, bd = 1e9;
+        for (var i = 0; i < g.creatures.length; i++) {
+          var c = g.creatures[i]; if (c.dead) continue;
+          var r = HAWK.sense * (1 - camo(c)), ddx = c.x - p.x, ddy = c.y - p.y, dd = ddx * ddx + ddy * ddy;
+          if (dd < r * r && dd < bd) { bd = dd; best = c; }
+        }
+        p.tgt = best; p.lungeT = 0;
+      }
+      if (p.tgt) {
+        var tg = p.tgt, ex = tg.x - p.x, ey = tg.y - p.y, de = Math.sqrt(ex * ex + ey * ey);
+        turnToward(p, Math.atan2(ey, ex), HAWK.turn * dt);
+        var v = HAWK.speed;
+        if (de < HAWK.lungeR) { v = HAWK.lunge; p.lungeT += dt; }
+        if (p.lungeT > HAWK.lungeMax) { p.rest = HAWK.tired; p.lungeT = 0; p.tgt = null; return; }
+        p.x += Math.cos(p.a) * v * dt; p.y += Math.sin(p.a) * v * dt; bounce(p);
+        if (de < HAWK.strike) {
+          if (rng() < LEGS[tg.genes.legs].dodge) { tg.flee = 1.2; p.rest = 1.2; ev('escape', tg); }
+          else { tg.dead = 'eaten'; p.rest = HAWK.restKill; }
+          p.tgt = null; p.lungeT = 0;
+        }
+      } else { p.a += (rng() - 0.5) * 6 * dt; p.x += Math.cos(p.a) * HAWK.wander * dt; p.y += Math.sin(p.a) * HAWK.wander * dt; bounce(p); }
+    });
+
+    var list = g.creatures, n = list.length, born = [];
+    var start = n ? (rng() * n) | 0 : 0;
+    for (var k = 0; k < n; k++) {
+      var c = list[(start + k) % n];
+      if (c.dead) continue;
+      var L = LEGS[c.genes.legs];
+      c.age += dt;
+      c.e -= upkeepOf(c) * dt;
+      if (c.e <= 0) { if (safe) c.e = 2; else { c.dead = 'starved'; continue; } }
+      if (c.age > c.life) { if (safe) c.age = c.life - 10; else { c.dead = 'old'; continue; } }
+      var threat = null;
+      for (var q = 0; q < g.hawks.length; q++) {
+        var P = g.hawks[q]; if (P.rest > 0 || P.tgt !== c) continue;
+        var px = c.x - P.x, py = c.y - P.y; if (px * px + py * py < 3600) threat = P;
+      }
+      if (threat) { c.flee = Math.max(c.flee, 0.5); turnToward(c, Math.atan2(c.y - threat.y, c.x - threat.x), 9 * dt); }
+      if (c.flee > 0) {
+        c.flee -= dt; c.handle = 0; c.tgt = null; c.e -= 0.5 * dt;
+        c.x += Math.cos(c.a) * L.speed * 1.3 * dt; c.y += Math.sin(c.a) * L.speed * 1.3 * dt; bounce(c);
+      } else if (c.handle > 0) {
+        c.handle -= dt;
+      } else {
+        if (c.tgt && c.tgt.dead) c.tgt = null;
+        c.search -= dt;
+        if (!c.tgt && c.search <= 0) { c.tgt = bestFood(c); c.search = 0.15 + rng() * 0.15; }
+        if (c.tgt) {
+          var dx2 = c.tgt.x - c.x, dy2 = c.tgt.y - c.y;
+          if (dx2 * dx2 + dy2 * dy2 < EAT_R * EAT_R) {
+            c.e = Math.min(MAX_E, c.e + FOOD[c.tgt.type].energy * JAW_EFF[c.tgt.type][c.genes.jaw]);
+            c.tgt.dead = true; c.tgt = null; c.handle = HANDLE;
+          } else turnToward(c, Math.atan2(dy2, dx2), 7 * dt);
+        } else c.a += (rng() - 0.5) * 10 * dt;
+        if (c.handle <= 0) { c.x += Math.cos(c.a) * L.speed * dt; c.y += Math.sin(c.a) * L.speed * dt; bounce(c); }
+      }
+      if (c.e >= REPRO_E && c.age >= MATURE && list.length + born.length < CAP_CREATURES && rng() < dt) {
+        c.e -= REPRO_COST;
+        var genes = {}, mutated = false;
+        for (var tr in c.genes) {
+          genes[tr] = c.genes[tr];
+          if (g.mutRate && rng() < g.mutRate) {
+            var opts = TRAITS[tr].variants.filter(function (v) { return v !== c.genes[tr]; });
+            genes[tr] = opts[(rng() * opts.length) | 0]; mutated = true;
+          }
+        }
+        var child = make(genes, c.x + (rng() - 0.5) * 16, c.y + (rng() - 0.5) * 16, CHILD_E, 0);
+        if (mutated) { child.mutant = true; g.mutants++; ev('mutant', child); }
+        born.push(child); tally(child, 'born'); ev('birth', child);
+      }
+    }
+    var alive = [];
+    for (var i2 = 0; i2 < list.length; i2++) { var cc = list[i2]; if (cc.dead) { tally(cc, cc.dead); ev(cc.dead, cc); } else alive.push(cc); }
+    g.creatures = alive.concat(born);
+    g.food = g.food.filter(function (f) { return !f.dead; });
+    g.t += dt;
+  };
+  return g;
+}
+/* ============ END ENGINE ============ */
+
+/* ============ SCENARIOS ============ */
+var ONE = function (v) { var o = {}; o[v] = 1; return o; };
+var SCENARIOS = [
+  { id: 'a', title: 'Ash fall', focus: 'coat', seed: 6, ground: 'sand', seeds: { soft: 7, hard: 0 }, hawks: 4, mut: 0,
+    setup: 'A population with three coat colors lives on light sand. Then a volcano erupts nearby.',
+    start: { n: 40, mix: { coat: { sandy: 0.5, medium: 0.3, dark: 0.2 }, jaw: ONE('small'), legs: ONE('short'), stripe: ONE('plain') } },
+    events: [{ gen: 2, ground: 'ash', text: 'Volcanic ash covers the ground' }] },
+  { id: 'b', title: 'Drought', focus: 'jaw', seed: 1, ground: 'sand', seeds: { soft: 7, hard: 0 }, hawks: 2, mut: 0,
+    setup: 'A population with two jaw sizes eats soft seeds. Then a long drought changes which plants grow.',
+    start: { n: 40, mix: { coat: ONE('sandy'), jaw: { small: 0.75, large: 0.25 }, legs: ONE('short'), stripe: ONE('plain') } },
+    events: [{ gen: 3, seeds: { soft: 1.2, hard: 6 }, text: 'Drought: soft seeds become rare and hard nuts grow instead' }] },
+  { id: 'c', title: 'Hawks arrive', focus: 'legs', seed: 4, ground: 'sand', seeds: { soft: 7, hard: 0 }, hawks: 0, mut: 0,
+    setup: 'A population with two leg lengths lives where there are no predators. Later, hawks move in.',
+    start: { n: 40, mix: { coat: ONE('medium'), jaw: ONE('small'), legs: { short: 0.5, long: 0.5 }, stripe: ONE('plain') } },
+    events: [{ gen: 5, hawks: 5, text: 'Hawks move into the area' }] },
+  { id: 'd', title: 'Tail stripes', focus: 'stripe', seed: 3, ground: 'sand', seeds: { soft: 7, hard: 0 }, hawks: 4, mut: 0,
+    setup: 'Half the population has striped tails and half has plain tails. Nothing else about the environment changes.',
+    start: { n: 40, mix: { coat: ONE('sandy'), jaw: ONE('small'), legs: ONE('short'), stripe: { plain: 0.5, striped: 0.5 } } },
+    events: [] },
+  { id: 'e', title: 'A new mutation', focus: 'coat', seed: 4, ground: 'sand', seeds: { soft: 7, hard: 0 }, hawks: 5, mut: 0,
+    setup: 'Every member of this population has a dark coat, and it lives on light sand. Then a mutation appears.',
+    start: { n: 40, mix: { coat: ONE('dark'), jaw: ONE('small'), legs: ONE('short'), stripe: ONE('plain') } },
+    events: [{ gen: 1, mutant: { coat: 'sandy' }, count: 3, text: 'Three newborns have a mutation for a sandy coat' }] },
+  { id: 'f', title: 'Mutations keep happening', focus: 'legs', seed: 5, ground: 'sand', seeds: { soft: 2, hard: 5 }, hawks: 4, mut: 0.04,
+    setup: 'Every member of this population starts out the same. As they reproduce, random mutations appear in some offspring.',
+    start: { n: 40, mix: { coat: ONE('sandy'), jaw: ONE('large'), legs: ONE('short'), stripe: ONE('plain') } },
+    events: [] }
+];
+/* ============ END SCENARIOS ============ */
+
+
+var DT = 1 / 30;
+function $(id) { return document.getElementById(id); }
+var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+var GROUND_COL = { sand: '#CDB98C', ash: '#3B3734' };
+var VCOL = {
+  coat: { sandy: '#D8C08C', medium: '#9A6B43', dark: '#3F3530' },
+  jaw: { small: '#7FA8D9', large: '#D9773B' },
+  legs: { short: '#9E7BD6', long: '#2FA37A' },
+  stripe: { plain: '#A3ADB5', striped: '#E2B93B' }
+};
+var HAWK_COL = '#E0483A', SOFT_COL = '#4E9F3D', HARD_COL = '#B5562B';
+var TRAIT_KEYS = Object.keys(TRAITS);
+
+function sw(col) { return '<span class="sw" style="background:' + col + '"></span>'; }
+function dot(color, size) { var c = size / 2; return '<svg class="ico" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" aria-hidden="true"><circle cx="' + c + '" cy="' + c + '" r="' + (c - 1) + '" fill="' + color + '"/></svg>'; }
+function hawkIcon(size) { var c = size / 2; return '<svg class="ico" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" aria-hidden="true"><polygon points="' + (size - 1) + ',' + c + ' 1,1 ' + (size * 0.3) + ',' + c + ' 1,' + (size - 1) + '" fill="' + HAWK_COL + '"/></svg>'; }
+$('legend').innerHTML = '<span>' + hawkIcon(12) + 'Hawk</span><span>' + dot(SOFT_COL, 10) + 'Soft seeds</span><span>' + dot(HARD_COL, 11) + 'Hard nuts</span><span>' +
+  '<svg class="ico" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="#FFD34D" stroke-width="2"/></svg>New mutation</span>';
+
+/* ---------- creature sprites, one per combination of variants ---------- */
+var SPR = { w: 60, h: 44, cx: 26, cy: 22, res: 3 }, ARENA_K = 0.95, spriteCache = {};
+function spriteFor(genes) {
+  var key = genes.coat + genes.jaw + genes.legs + genes.stripe;
+  if (spriteCache[key]) return spriteCache[key];
+  var cv = document.createElement('canvas'); cv.width = SPR.w * SPR.res; cv.height = SPR.h * SPR.res;
+  var x = cv.getContext('2d'); x.setTransform(SPR.res, 0, 0, SPR.res, SPR.cx * SPR.res, SPR.cy * SPR.res);
+  drawCreature(x, genes);
+  spriteCache[key] = cv; return cv;
+}
+function drawCreature(ctx, gn) {
+  var body = VCOL.coat[gn.coat], len = 9.5, wid = 6.6, outline = 'rgba(20,16,12,0.45)';
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  var legL = gn.legs === 'long' ? 9 : 4.5;
+  ctx.strokeStyle = 'rgba(30,24,18,0.85)'; ctx.lineWidth = 1.7;
+  [len * 0.45, -len * 0.4].forEach(function (lx) {
+    [-1, 1].forEach(function (s) { ctx.beginPath(); ctx.moveTo(lx, s * wid * 0.7); ctx.lineTo(lx + legL * 0.3, s * (wid * 0.7 + legL)); ctx.stroke(); });
+  });
+  // tail
+  ctx.lineWidth = 3; ctx.strokeStyle = body;
+  ctx.beginPath(); ctx.moveTo(-len * 0.85, 0); ctx.quadraticCurveTo(-len - 6, 3, -len - 11, 0); ctx.stroke();
+  if (gn.stripe === 'striped') {
+    ctx.strokeStyle = '#1C1C1C'; ctx.lineWidth = 3.2;
+    [0.35, 0.6, 0.85].forEach(function (f) { var tx = -len * 0.85 - 11 * f; ctx.beginPath(); ctx.moveTo(tx, -1.4 + 2.4 * f); ctx.lineTo(tx - 0.9, 1.2 + 1.6 * f); ctx.stroke(); });
+  }
+  // body
+  ctx.beginPath(); ctx.ellipse(0, 0, len, wid, 0, 0, 6.283); ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = outline; ctx.lineWidth = 0.9; ctx.stroke();
+  // head and jaw
+  var hx = len + 2.5, hr = 4.6;
+  if (gn.jaw === 'large') {
+    ctx.fillStyle = body; ctx.strokeStyle = outline; ctx.lineWidth = 0.8;
+    [-1, 1].forEach(function (s) { ctx.beginPath(); ctx.arc(hx + 0.5, s * hr * 0.75, hr * 0.55, 0, 6.283); ctx.fill(); ctx.stroke(); });
+  }
+  ctx.beginPath(); ctx.arc(hx, 0, hr, 0, 6.283); ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = outline; ctx.lineWidth = 0.9; ctx.stroke();
+  ctx.fillStyle = '#1A140F'; ctx.beginPath(); ctx.arc(hx + hr * 0.9, 0, 0.9, 0, 6.283); ctx.fill();
+  [-1, 1].forEach(function (s) {
+    ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(hx + 1.2, s * 2, 1.25, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#1A140F'; ctx.beginPath(); ctx.arc(hx + 1.6, s * 2, 0.7, 0, 6.283); ctx.fill();
+  });
+}
+
+/* ---------- state ---------- */
+var cur = 0, sc, sim, running = false, done = false, history = [], fx = [], pools = [], speed = 2, view = 'coat', lastRec = -1;
+
+function load(i) {
+  cur = i; sc = SCENARIOS[i];
+  sim = createSim(sc);
+  running = false; done = false; history = []; fx = []; pools = []; lastRec = -1;
+  view = sc.focus;
+  record();
+  var L = $('letters').children;
+  for (var k = 0; k < L.length; k++) L[k].setAttribute('aria-current', String(k === i));
+  $('scTitle').textContent = 'Scenario ' + sc.id.toUpperCase() + ': ' + sc.title;
+  $('scSetup').textContent = sc.setup;
+  renderTabs(); renderConditions(); refresh();
+}
+function record() {
+  var f = {}, n = sim.count();
+  TRAIT_KEYS.forEach(function (tr) { f[tr] = sim.freq(tr); });
+  history.push({ gen: sim.t / GEN, n: n, f: f });
+}
+
+/* ---------- conditions ---------- */
+function mixText(tr, mix) {
+  return Object.keys(mix).filter(function (v) { return mix[v] > 0; }).map(function (v) {
+    return '<span>' + sw(VCOL[tr][v]) + TRAITS[tr].names[v] + (mix[v] < 1 ? ' <span class="dim">(about ' + Math.round(mix[v] * 100) + '%)</span>' : '') + '</span>';
+  }).join('');
+}
+function foodText(seeds) {
+  var parts = [];
+  if (seeds.soft) parts.push(dot(SOFT_COL, 10) + ' Soft seeds' + (seeds.soft < 3 ? ' <span class="dim">(rare)</span>' : ''));
+  if (seeds.hard) parts.push(dot(HARD_COL, 11) + ' Hard nuts');
+  return parts.map(function (p) { return '<span>' + p + '</span>'; }).join('');
+}
+function renderConditions() {
+  var h = '';
+  h += '<dt>Ground</dt><dd><span>' + sw(GROUND_COL[sc.ground]) + GROUND[sc.ground].name + '</span></dd>';
+  h += '<dt>Food</dt><dd>' + foodText(sc.seeds) + '</dd>';
+  h += '<dt>Hawks</dt><dd><span>' + (sc.hawks ? sc.hawks : 'None') + '</span></dd>';
+  h += '<dt>Start</dt><dd><span>' + sc.start.n + ' creatures</span>';
+  var varied = TRAIT_KEYS.filter(function (tr) { return Object.keys(sc.start.mix[tr]).length > 1; });
+  if (varied.length) varied.forEach(function (tr) { h += '<span class="dim">' + TRAITS[tr].label + ':</span>' + mixText(tr, sc.start.mix[tr]); });
+  h += '<span class="dim">All share:</span>';
+  TRAIT_KEYS.filter(function (tr) { return varied.indexOf(tr) < 0; }).forEach(function (tr) { h += mixText(tr, sc.start.mix[tr]); });
+  h += '</dd>';
+  h += '<dt>Inheritance</dt><dd><span>Each offspring copies its parent’s traits' + (sc.mut ? '. About ' + Math.round(sc.mut * 100) + '% of the time, a trait mutates to a different variant.' : ', with no new mutations') + '</span></dd>';
+  h += '<dt>Events</dt><dd>' + (sc.events.length ? sc.events.map(function (e) { return '<span>Generation ' + e.gen + ': ' + e.text + '</span>'; }).join('') : '<span class="dim">None</span>') + '</dd>';
+  $('cond').innerHTML = h;
+}
+
+/* ---------- tabs and data ---------- */
+function renderTabs() {
+  $('tabs').innerHTML = TRAIT_KEYS.map(function (tr) { return '<button type="button" data-tr="' + tr + '" aria-pressed="' + (tr === view) + '">' + TRAITS[tr].label + '</button>'; }).join('');
+}
+$('tabs').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  view = b.dataset.tr; renderTabs(); updateData(); drawChart();
+});
+function updateData() {
+  var gen = Math.min(GENS, sim.t / GEN);
+  $('clock').textContent = 'Generation ' + Math.floor(gen + 1e-9) + ' of ' + GENS;
+  $('genTxt').textContent = Math.floor(gen + 1e-9) + ' of ' + GENS;
+  $('progBar').style.width = (100 * gen / GENS) + '%';
+  $('dataT').textContent = 'Data: ' + TRAITS[view].label;
+  var n = sim.count(), f = sim.freq(view), h = '';
+  TRAITS[view].variants.forEach(function (v) {
+    var s = sim.stats[view + ':' + v];
+    h += '<tr><td class="v">' + sw(VCOL[view][v]) + TRAITS[view].names[v] + '</td><td class="num">' + f[v] + '</td><td class="num pct">' + (n ? Math.round(100 * f[v] / n) : 0) + '%</td>' +
+      '<td class="num">' + s.born + '</td><td class="num">' + s.eaten + '</td><td class="num">' + s.starved + '</td></tr>';
+  });
+  h += '<tr class="tot"><td>Total population</td><td class="num">' + n + '</td><td></td><td></td><td></td><td></td></tr>';
+  $('dataBody').innerHTML = h;
+}
+function refresh() {
+  var pb = $('play');
+  pb.textContent = done ? 'Finished' : (running ? 'Pause' : (sim.t > 0 ? 'Resume' : 'Play'));
+  pb.disabled = done;
+  var bn = $('banner');
+  if (done) { bn.hidden = false; bn.textContent = 'Scenario ' + sc.id.toUpperCase() + ' is complete. Record your observations.'; }
+  else if (sim.t === 0) { bn.hidden = false; bn.textContent = 'Read the conditions, then press Play.'; }
+  else bn.hidden = true;
+  $('dishBox').style.background = GROUND_COL[sim.ground];
+  updateData(); drawArena(); drawChart();
+}
+
+/* ---------- drawing ---------- */
+var dishBox = $('dishBox'), arenaCv = $('arena'), actx = arenaCv.getContext('2d');
+var chartBox = $('chartBox'), chartCv = $('chart'), cctx = chartCv.getContext('2d');
+var chartW = 600, chartH = 190;
+var oneScreen = window.matchMedia('(min-width: 760px) and (min-height: 520px)');
+function fitCanvases() {
+  var dpr = Math.min(2, window.devicePixelRatio || 1), r = dishBox.getBoundingClientRect(), w, h;
+  if (oneScreen.matches) { w = Math.min(r.width, r.height * 1.6); h = w / 1.6; arenaCv.style.width = w + 'px'; arenaCv.style.height = h + 'px'; }
+  else { arenaCv.style.width = ''; arenaCv.style.height = ''; w = r.width; h = w / 1.6; }
+  arenaCv.width = Math.max(1, Math.round(w * dpr)); arenaCv.height = Math.max(1, Math.round(h * dpr));
+  var c = chartBox.getBoundingClientRect();
+  chartW = Math.max(1, c.width); chartH = Math.max(1, c.height);
+  chartCv.width = Math.round(chartW * dpr); chartCv.height = Math.round(chartH * dpr);
+  cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function drawArena() {
+  var s = arenaCv.width / W, i, f, c;
+  actx.setTransform(s, 0, 0, s, 0, 0); actx.globalAlpha = 1;
+  actx.fillStyle = GROUND_COL[sim.ground]; actx.fillRect(0, 0, W, H);
+  // ground texture
+  actx.fillStyle = sim.ground === 'sand' ? 'rgba(120,95,55,0.10)' : 'rgba(200,200,200,0.06)';
+  for (i = 0; i < 260; i++) { var tx = (i * 137.5) % W, ty = (i * 89.3 + (i % 7) * 31) % H; actx.fillRect(tx, ty, 2, 2); }
+  // fading stains where hawks caught a creature
+  for (i = 0; i < pools.length; i++) {
+    var pl = pools[i], fade = 1 - (sim.t - pl.t) / 14; if (fade <= 0) continue;
+    actx.globalAlpha = 0.5 * fade; actx.fillStyle = pl.col; actx.beginPath();
+    pl.b.forEach(function (b) { actx.moveTo(pl.x + b[0] + b[2], pl.y + b[1]); actx.arc(pl.x + b[0], pl.y + b[1], b[2], 0, 6.283); });
+    actx.fill();
+  }
+  actx.globalAlpha = 1;
+  // food
+  actx.fillStyle = SOFT_COL; actx.beginPath();
+  for (i = 0; i < sim.food.length; i++) { f = sim.food[i]; if (f.type === 'soft') { actx.moveTo(f.x + 3.6, f.y); actx.ellipse(f.x, f.y, 3.6, 2.2, f.rot, 0, 6.283); } }
+  actx.fill();
+  actx.fillStyle = HARD_COL; actx.strokeStyle = 'rgba(40,20,10,0.7)'; actx.lineWidth = 1; actx.beginPath();
+  for (i = 0; i < sim.food.length; i++) { f = sim.food[i]; if (f.type === 'hard') { actx.moveTo(f.x + 4.6, f.y); actx.arc(f.x, f.y, 4.6, 0, 6.283); } }
+  actx.fill(); actx.stroke();
+  // creatures
+  var sw2 = SPR.w * ARENA_K, sh2 = SPR.h * ARENA_K, ox = -SPR.cx * ARENA_K, oy = -SPR.cy * ARENA_K;
+  for (i = 0; i < sim.creatures.length; i++) {
+    c = sim.creatures[i];
+    var co = Math.cos(c.a), si = Math.sin(c.a);
+    actx.globalAlpha = 0.55 + 0.45 * Math.min(1, c.e / 70);
+    actx.setTransform(s * co, s * si, -s * si, s * co, s * c.x, s * c.y);
+    actx.drawImage(spriteFor(c.genes), ox, oy, sw2, sh2);
+  }
+  actx.setTransform(s, 0, 0, s, 0, 0); actx.globalAlpha = 1;
+  // hawks
+  sim.hawks.forEach(function (p) {
+    actx.save(); actx.translate(p.x, p.y); actx.rotate(p.a);
+    actx.globalAlpha = p.rest > 0 ? 0.5 : 1; actx.fillStyle = HAWK_COL; actx.strokeStyle = 'rgba(255,255,255,0.85)'; actx.lineWidth = 1.4;
+    actx.beginPath(); actx.moveTo(14, 0); actx.lineTo(4, -3); actx.lineTo(-3, -16); actx.lineTo(-6, -3); actx.lineTo(-12, -5); actx.lineTo(-9, 0);
+    actx.lineTo(-12, 5); actx.lineTo(-6, 3); actx.lineTo(-3, 16); actx.lineTo(4, 3); actx.closePath(); actx.fill(); actx.stroke();
+    actx.restore();
+  });
+  // effects
+  for (i = 0; i < fx.length; i++) {
+    var e = fx[i];
+    if (e.kind === 'mutant') {
+      actx.globalAlpha = Math.max(0, 1 - e.age / 2.4); actx.strokeStyle = '#FFD34D'; actx.lineWidth = 2.5;
+      actx.beginPath(); actx.arc(e.x, e.y, 13 + (reduceMotion ? 0 : 5 * Math.sin(e.age * 6)), 0, 6.283); actx.stroke();
+    } else if (reduceMotion) continue;
+    else if (e.kind === 'birth') {
+      var pr = e.age / 0.5; actx.globalAlpha = 0.8 * (1 - pr); actx.strokeStyle = 'rgba(255,255,255,0.9)'; actx.lineWidth = 1.2;
+      actx.beginPath(); actx.arc(e.x, e.y, 7 + pr * 12, 0, 6.283); actx.stroke();
+    } else if (e.kind === 'starved') {
+      actx.globalAlpha = 1 - e.age / 0.9; actx.strokeStyle = '#B0303F'; actx.lineWidth = 2; actx.beginPath();
+      actx.moveTo(e.x - 4, e.y - 4); actx.lineTo(e.x + 4, e.y + 4); actx.moveTo(e.x + 4, e.y - 4); actx.lineTo(e.x - 4, e.y + 4); actx.stroke();
+    } else if (e.kind === 'escape') {
+      actx.globalAlpha = 1 - e.age / 0.9; actx.strokeStyle = '#FFFFFF'; actx.lineWidth = 2; actx.beginPath(); actx.arc(e.x, e.y, 11, 0, 6.283); actx.stroke();
+    }
+  }
+  actx.globalAlpha = 1;
+}
+function stepFx(dtReal) {
+  var ev = sim.events;
+  for (var i = 0; i < ev.length; i++) {
+    var e = ev[i];
+    if (e.kind === 'eaten') {
+      var bl = []; for (var q = 0; q < 6; q++) { var ang = Math.random() * 6.283, d = Math.random() * 7; bl.push([Math.cos(ang) * d, Math.sin(ang) * d, 4 + Math.random() * 6]); }
+      pools.push({ x: e.x, y: e.y, col: VCOL.coat[e.genes.coat], t: sim.t, b: bl });
+    } else fx.push({ kind: e.kind, x: e.x, y: e.y, age: 0 });
+  }
+  ev.length = 0;
+  pools = pools.filter(function (pl) { return sim.t - pl.t <= 14; }).slice(-150);
+  if (fx.length > 160) fx.splice(0, fx.length - 160);
+  fx = fx.filter(function (f) { f.age += dtReal; return f.age < (f.kind === 'mutant' ? 2.4 : (f.kind === 'birth' ? 0.5 : 0.9)); });
+}
+var MONO = '11px "IBM Plex Mono", ui-monospace, Menlo, monospace';
+function drawChart() {
+  var VW = chartW, VH = chartH, vars = TRAITS[view].variants;
+  cctx.clearRect(0, 0, VW, VH); cctx.fillStyle = '#E9EDF1'; cctx.fillRect(0, 0, VW, VH);
+  var L = 42, R = 44, T = 12, B = 22, pw = VW - L - R, ph = VH - T - B;
+  if (pw < 20 || ph < 20) return;
+  cctx.font = MONO; cctx.textBaseline = 'middle';
+  function X(g) { return L + g / GENS * pw; }
+  function Y(p) { return T + ph - p / 100 * ph; }
+  // stacked areas
+  if (history.length > 1) {
+    var base = history.map(function () { return 0; });
+    vars.forEach(function (v) {
+      var top = history.map(function (h, i) { return base[i] + (h.n ? 100 * h.f[view][v] / h.n : 0); });
+      cctx.beginPath();
+      history.forEach(function (h, i) { var x = X(h.gen), y = Y(top[i]); if (i === 0) cctx.moveTo(x, y); else cctx.lineTo(x, y); });
+      for (var i = history.length - 1; i >= 0; i--) cctx.lineTo(X(history[i].gen), Y(base[i]));
+      cctx.closePath(); cctx.fillStyle = VCOL[view][v]; cctx.fill();
+      cctx.strokeStyle = 'rgba(255,255,255,0.8)'; cctx.lineWidth = 1; cctx.stroke();
+      base = top;
+    });
+  }
+  // grid and labels
+  cctx.strokeStyle = 'rgba(22,29,38,0.18)'; cctx.lineWidth = 1; cctx.fillStyle = '#3A4450'; cctx.textAlign = 'right';
+  [0, 25, 50, 75, 100].forEach(function (p) {
+    cctx.beginPath(); cctx.moveTo(L, Math.round(Y(p)) + 0.5); cctx.lineTo(L + pw, Math.round(Y(p)) + 0.5); cctx.stroke();
+    cctx.fillText(p + '%', L - 6, Y(p));
+  });
+  cctx.textAlign = 'center';
+  for (var gx = 0; gx <= GENS; gx++) {
+    if (gx % (pw < 360 ? 3 : 1) === 0) cctx.fillText(String(gx), X(gx), VH - 10);
+  }
+  // event markers
+  sc.events.forEach(function (e) {
+    var mx = Math.round(X(e.gen)) + 0.5;
+    cctx.save(); cctx.setLineDash([4, 3]); cctx.strokeStyle = '#161D26'; cctx.lineWidth = 1.4;
+    cctx.beginPath(); cctx.moveTo(mx, T); cctx.lineTo(mx, T + ph); cctx.stroke(); cctx.restore();
+    cctx.fillStyle = '#161D26'; cctx.textAlign = 'left'; cctx.fillText('Event', mx + 4, T + 8);
+  });
+  // population line on the right axis
+  var maxN = 20; history.forEach(function (h) { maxN = Math.max(maxN, h.n); });
+  maxN = Math.ceil(maxN / 20) * 20;
+  cctx.save(); cctx.setLineDash([5, 4]); cctx.strokeStyle = '#161D26'; cctx.lineWidth = 1.6; cctx.beginPath();
+  history.forEach(function (h, i) { var x = X(h.gen), y = T + ph - h.n / maxN * ph; if (i === 0) cctx.moveTo(x, y); else cctx.lineTo(x, y); });
+  cctx.stroke(); cctx.restore();
+  cctx.fillStyle = '#161D26'; cctx.textAlign = 'left';
+  cctx.fillText(String(maxN), L + pw + 6, T + 4); cctx.fillText('0', L + pw + 6, T + ph);
+  cctx.save(); cctx.translate(VW - 8, T + ph / 2); cctx.rotate(-Math.PI / 2); cctx.textAlign = 'center'; cctx.fillText('- - population', 0, 0); cctx.restore();
+}
+
+/* ---------- controls ---------- */
+var letters = $('letters');
+SCENARIOS.forEach(function (s, i) {
+  var b = document.createElement('button');
+  b.type = 'button'; b.className = 'letter'; b.textContent = s.id.toUpperCase();
+  b.setAttribute('aria-label', 'Scenario ' + s.id.toUpperCase() + ': ' + s.title);
+  b.title = s.title;
+  b.addEventListener('click', function () { if (location.hash !== '#scenario-' + s.id) location.hash = '#scenario-' + s.id; load(i); });
+  letters.appendChild(b);
+});
+function fromHash() {
+  var m = /^#scenario-([a-z])$/.exec(location.hash || ''); if (!m) return 0;
+  for (var i = 0; i < SCENARIOS.length; i++) if (SCENARIOS[i].id === m[1]) return i;
+  return 0;
+}
+window.addEventListener('hashchange', function () { var i = fromHash(); if (i !== cur) load(i); });
+$('play').addEventListener('click', function () { if (!done) { running = !running; refresh(); } });
+$('replay').addEventListener('click', function () { load(cur); running = true; refresh(); });
+$('speed').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  speed = parseInt(b.dataset.speed, 10);
+  var all = $('speed').children;
+  for (var i = 0; i < all.length; i++) all[i].setAttribute('aria-pressed', String(all[i] === b));
+});
+
+/* ---------- loop ---------- */
+var lastTs = 0, acc = 0, uiAcc = 0, chAcc = 0, lastGround = null;
+function frame(ts) {
+  var dtReal = Math.min(0.1, (ts - lastTs) / 1000); lastTs = ts;
+  if (running) {
+    acc += dtReal * speed;
+    var steps = 0;
+    while (acc >= DT && steps < 30 && running) {
+      sim.step(DT); acc -= DT; steps++;
+      if (Math.floor(sim.t + 1e-9) > lastRec) { lastRec = Math.floor(sim.t + 1e-9); record(); }
+      if (sim.t >= GENS * GEN - 1e-9) { running = false; done = true; record(); refresh(); }
+    }
+    if (steps >= 30) acc = 0;
+    if (lastGround !== sim.ground) { lastGround = sim.ground; $('dishBox').style.background = GROUND_COL[sim.ground]; }
+  }
+  stepFx(dtReal);
+  drawArena();
+  chAcc += dtReal; if (chAcc > 0.15) { chAcc = 0; drawChart(); }
+  uiAcc += dtReal; if (uiAcc > 0.25) { uiAcc = 0; updateData(); if (sim.t > 0 && !done) $('banner').hidden = true; }
+  requestAnimationFrame(frame);
+}
+function onResize() { fitCanvases(); drawArena(); drawChart(); }
+if (window.ResizeObserver) { new ResizeObserver(onResize).observe(dishBox); new ResizeObserver(onResize).observe(chartBox); }
+else window.addEventListener('resize', onResize);
+fitCanvases();
+load(fromHash());
+window.__tt = function () { return { done: done, t: sim.t }; };
+requestAnimationFrame(function (ts) { lastTs = ts; requestAnimationFrame(frame); });
+})();
+</script>
+
+</body></html>
